@@ -4,7 +4,7 @@ from telebot import types
 
 # === Настройки ===
 BOT_TOKEN = "8591178131:AAGnPxfhp6cMHAC9Z0rCOLwET07b74UoaZA"
-EXCHANGE_API_KEY = "08d4417da0af9f83c741af1b"  # ← ЗАМЕНИТЕ НА СВОЙ КЛЮЧ
+EXCHANGE_API_KEY = "08d4417da0af9f83c741af1b"  
 EXCHANGE_URL = f"https://v6.exchangerate-api.com/v6/{EXCHANGE_API_KEY}/latest/USD"
 
 # Кэш курсов (чтобы не делать запрос при каждом конверте)
