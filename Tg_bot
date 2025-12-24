@@ -1,0 +1,117 @@
+import telebot
+import requests
+from telebot import types
+
+# === Настройки ===
+BOT_TOKEN = "8591178131:AAGnPxfhp6cMHAC9Z0rCOLwET07b74UoaZA"
+EXCHANGE_API_KEY = "08d4417da0af9f83c741af1b"  # ← ЗАМЕНИТЕ НА СВОЙ КЛЮЧ
+EXCHANGE_URL = f"https://v6.exchangerate-api.com/v6/{EXCHANGE_API_KEY}/latest/USD"
+
+# Кэш курсов (чтобы не делать запрос при каждом конверте)
+exchange_rates = {}
+last_update = None
+
+def fetch_rates():
+    global exchange_rates, last_update
+    try:
+        response = requests.get(EXCHANGE_URL, timeout=10)
+        data = response.json()
+        if data.get("result") != "success":
+            raise Exception("API вернул ошибку: " + data.get("error-type", "неизвестно"))
+        # Курсы относительно USD
+        exchange_rates = data["conversion_rates"]
+        last_update = data["time_last_update_utc"]
+        print("Курсы успешно обновлены:", last_update)
+    except Exception as e:
+        print("Ошибка загрузки курсов:", e)
+        # Если не удаётся обновить — оставляем старые или пустые
+        if not exchange_rates:
+            # Заглушка на случай полного провала (можно расширить)
+            exchange_rates = {"USD": 1, "RUB": 90, "EUR": 0.93}
+
+# Загружаем курсы при старте
+fetch_rates()
+
+bot = telebot.TeleBot(BOT_TOKEN)
+amount = 0
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.chat.id, "Здравствуйте! Введите сумму, которую хотите конвертировать.")
+    bot.register_next_step_handler(message, summa)
+
+def summa(message):
+    global amount
+    try:
+        amount = float(message.text.strip())
+        if amount <= 0:
+            bot.send_message(message.chat.id, "Введите число больше 0!")
+            bot.register_next_step_handler(message, summa)
+            return
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        pairs = [
+            ("USD → EUR", "USD/EUR"),
+            ("EUR → USD", "EUR/USD"),
+            ("USD → RUB", "USD/RUB"),
+            ("RUB → USD", "RUB/USD"),
+            ("Другое", "else")
+        ]
+        buttons = [types.InlineKeyboardButton(text, callback_data=cd) for text, cd in pairs]
+        markup.add(*buttons)
+
+        bot.send_message(message.chat.id, "Выберите валютную пару:", reply_markup=markup)
+    except ValueError:
+        bot.send_message(message.chat.id, "Пожалуйста, введите число!")
+        bot.register_next_step_handler(message, summa)
+
+def convert_currency(amount, from_cur, to_cur):
+    from_cur = from_cur.upper()
+    to_cur = to_cur.upper()
+
+    if from_cur == to_cur:
+        return amount
+
+    # Приводим всё к USD как базовой валюте
+    if from_cur not in exchange_rates or to_cur not in exchange_rates:
+        raise ValueError(f"Валюта не поддерживается: {from_cur} или {to_cur}")
+
+    # Конвертация: from → USD → to
+    amount_in_usd = amount / exchange_rates[from_cur]
+    result = amount_in_usd * exchange_rates[to_cur]
+    return round(result, 2)
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback(call):
+    global amount
+    if call.data == "else":
+        bot.send_message(call.message.chat.id, "Введите валютную пару через слеш (например: USD/RUB):")
+        bot.register_next_step_handler(call.message, my_currency)
+    else:
+        try:
+            from_cur, to_cur = call.data.split("/")
+            result = convert_currency(amount, from_cur, to_cur)
+            bot.send_message(call.message.chat.id, f"Результат: {result} {to_cur}\nМожете ввести новую сумму:")
+            bot.register_next_step_handler(call.message, summa)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"Ошибка: {str(e)}\nПопробуйте снова.")
+            bot.register_next_step_handler(call.message, summa)
+
+def my_currency(message):
+    global amount
+    try:
+        parts = message.text.strip().split("/")
+        if len(parts) != 2:
+            raise ValueError("Формат: ВАЛЮТА1/ВАЛЮТА2 (например, USD/RUB)")
+        from_cur, to_cur = parts
+        result = convert_currency(amount, from_cur, to_cur)
+        bot.send_message(message.chat.id, f"Результат: {result} {to_cur}\nМожете ввести новую сумму:")
+        bot.register_next_step_handler(message, summa)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Ошибка: {str(e)}\nВведите пару как: USD/RUB")
+        bot.register_next_step_handler(message, my_currency)
+
+# Запуск
+if __name__ == "__main__":
+    print("Бот запущен...")
+    bot.polling(none_stop=True)
